@@ -15,10 +15,19 @@ const SnakeGame = () => {
     nextDirection: { x: 1, y: 0 }
   });
 
+  const randomFood = (snake) => {
+    let pos;
+    do {
+      pos = { x: Math.floor(Math.random() * 20), y: Math.floor(Math.random() * 20) };
+    } while (snake.some(seg => seg.x === pos.x && seg.y === pos.y));
+    return pos;
+  };
+
   const resetGame = () => {
+    const snake = [{ x: 10, y: 10 }];
     gameState.current = {
-      snake: [{ x: 10, y: 10 }],
-      food: { x: Math.floor(Math.random() * 20), y: Math.floor(Math.random() * 20) },
+      snake,
+      food: randomFood(snake),
       direction: { x: 1, y: 0 },
       nextDirection: { x: 1, y: 0 }
     };
@@ -52,10 +61,7 @@ const SnakeGame = () => {
       
       if (newHead.x === state.food.x && newHead.y === state.food.y) {
         setScore(s => s + 10);
-        state.food = {
-          x: Math.floor(Math.random() * 20),
-          y: Math.floor(Math.random() * 20)
-        };
+        state.food = randomFood(state.snake);
       } else {
         state.snake.pop();
       }
@@ -255,23 +261,23 @@ const Minesweeper = () => {
 };
 
 // Tetris Game
+const TETRIS_SHAPES = [
+  [[1,1,1,1]], // I
+  [[1,1],[1,1]], // O
+  [[0,1,0],[1,1,1]], // T
+  [[1,0,0],[1,1,1]], // L
+  [[0,0,1],[1,1,1]], // J
+  [[0,1,1],[1,1,0]], // S
+  [[1,1,0],[0,1,1]]  // Z
+];
+const TETRIS_COLORS = ['#00ffff', '#ffff00', '#aa00ff', '#ff8800', '#0000ff', '#00ff00', '#ff0000'];
+
 const Tetris = () => {
   const canvasRef = useRef(null);
   const [score, setScore] = useState(0);
   const [gameOver, setGameOver] = useState(false);
   const [gameStarted, setGameStarted] = useState(false);
   const gameRef = useRef(null);
-
-  const SHAPES = [
-    [[1,1,1,1]], // I
-    [[1,1],[1,1]], // O
-    [[0,1,0],[1,1,1]], // T
-    [[1,0,0],[1,1,1]], // L
-    [[0,0,1],[1,1,1]], // J
-    [[0,1,1],[1,1,0]], // S
-    [[1,1,0],[0,1,1]]  // Z
-  ];
-  const COLORS = ['#00ffff', '#ffff00', '#aa00ff', '#ff8800', '#0000ff', '#00ff00', '#ff0000'];
 
   const startGame = () => {
     const cols = 10, rows = 20;
@@ -289,8 +295,8 @@ const Tetris = () => {
   };
 
   const spawnPiece = () => {
-    const idx = Math.floor(Math.random() * SHAPES.length);
-    gameRef.current.piece = SHAPES[idx].map(row => [...row]);
+    const idx = Math.floor(Math.random() * TETRIS_SHAPES.length);
+    gameRef.current.piece = TETRIS_SHAPES[idx].map(row => [...row]);
     gameRef.current.pieceColor = idx;
     gameRef.current.pieceX = 3;
     gameRef.current.pieceY = 0;
@@ -381,14 +387,14 @@ const Tetris = () => {
       for (let y = 0; y < 20; y++) {
         for (let x = 0; x < 10; x++) {
           if (game.board[y][x]) {
-            ctx.fillStyle = COLORS[game.board[y][x] - 1];
+            ctx.fillStyle = TETRIS_COLORS[game.board[y][x] - 1];
             ctx.fillRect(x * cellSize + 1, y * cellSize + 1, cellSize - 2, cellSize - 2);
           }
         }
       }
       
       if (game.piece) {
-        ctx.fillStyle = COLORS[game.pieceColor];
+        ctx.fillStyle = TETRIS_COLORS[game.pieceColor];
         for (let y = 0; y < game.piece.length; y++) {
           for (let x = 0; x < game.piece[y].length; x++) {
             if (game.piece[y][x]) {
@@ -437,7 +443,7 @@ const Tetris = () => {
 
 // Memory Card Game
 const MemoryGame = () => {
-  const emojis = ['🎮', '🎲', '🎯', '🎪', '🎨', '🎭', '🎪', '🎸'];
+  const emojis = ['🎮', '🎲', '🎯', '🎪', '🎨', '🎭', '🎵', '🎸'];
   const [cards, setCards] = useState([]);
   const [flipped, setFlipped] = useState([]);
   const [matched, setMatched] = useState([]);
@@ -554,12 +560,13 @@ const PongGame = () => {
       if (s.ballY <= ballR || s.ballY >= 300 - ballR) s.ballVY *= -1;
       
       // Paddle collision
+      const maxSpeed = 12;
       if (s.ballX <= 20 + paddleW && s.ballY > s.playerY && s.ballY < s.playerY + paddleH) {
-        s.ballVX = Math.abs(s.ballVX) * 1.05;
+        s.ballVX = Math.min(Math.abs(s.ballVX) * 1.05, maxSpeed);
         s.ballVY += (s.ballY - (s.playerY + paddleH/2)) * 0.1;
       }
       if (s.ballX >= 380 - paddleW && s.ballY > s.cpuY && s.ballY < s.cpuY + paddleH) {
-        s.ballVX = -Math.abs(s.ballVX) * 1.05;
+        s.ballVX = -Math.min(Math.abs(s.ballVX) * 1.05, maxSpeed);
       }
       
       // Score
