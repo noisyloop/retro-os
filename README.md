@@ -1,6 +1,6 @@
 # RetroOS
 
-A nostalgic Windows 95-inspired web operating system built with React, featuring classic arcade games in a retro desktop environment.
+A nostalgic Windows 95-inspired web operating system built with React, featuring classic arcade games in a retro desktop environment. Initially built on React, but you can now run it on Windows and MacOS as executable files.
 
 ## Overview
 
