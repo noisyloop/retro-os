@@ -93,6 +93,33 @@ Preview the production build locally:
 npm run preview
 ```
 
+## Desktop App (Windows .exe / macOS .dmg)
+
+RetroOS can be packaged as a standalone desktop app with [Electron](https://www.electronjs.org/) and [electron-builder](https://www.electron.build/).
+
+Run it as a desktop app locally:
+```bash
+npm run electron
+```
+
+Build installers (output goes to `release/`):
+```bash
+npm run dist:win   # RetroOS-<version>-setup.exe and RetroOS-<version>-portable.exe
+npm run dist:mac   # RetroOS-<version>-mac-x64.dmg and RetroOS-<version>-mac-arm64.dmg
+```
+
+A `.dmg` can only be built on macOS. The Windows installer can be built on Windows, or on Linux/macOS with Wine installed (the portable `.exe` builds without Wine).
+
+### Automated builds
+
+The `Build desktop apps` GitHub Actions workflow builds the `.exe` files on Windows and the `.dmg` files on macOS. Run it manually from the Actions tab to get the files as workflow artifacts, or push a version tag to attach them to a GitHub release:
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The builds are not code-signed. On Windows, SmartScreen may warn on first launch ("More info" → "Run anyway"). On macOS, right-click the app and choose "Open" the first time, or run `xattr -cr /Applications/RetroOS.app`.
+
 ## Linting
 
 Run ESLint to check code quality:
@@ -104,6 +131,8 @@ npm run lint
 
 ```
 retro-os/
+├── build/           # App icon used for desktop builds
+├── electron/        # Electron main process (desktop app)
 ├── public/          # Static assets
 ├── src/
 │   ├── App.jsx      # Main RetroOS component with all games
