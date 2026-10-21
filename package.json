@@ -91,5 +91,8 @@
       ],
       "category": "Game"
     }
+  },
+  "engines": {
+    "node": "24.x"
   }
 }
