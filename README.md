@@ -2,6 +2,12 @@
 
 A nostalgic Windows 95-inspired web operating system built with React, featuring classic arcade games in a retro desktop environment. Initially built on React, but you can now run it on Windows and MacOS as executable files.
 
+## Two versions
+
+- **React (this folder)**: the original, runs in the browser or as an Electron desktop app.
+- **C++ / SDL2 ([`cpp/`](cpp/))**: a native rewrite of the same desktop and five games,
+  one small binary with no browser engine. See [cpp/README.md](cpp/README.md) to build it.
+
 ## Overview
 
 RetroOS recreates the iconic Windows 95 interface in your browser, complete with draggable windows, a start menu, taskbar, and desktop icons. It includes five classic games that run in separate windows, bringing back the nostalgia of 90s computing.
