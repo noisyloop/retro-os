@@ -8,6 +8,12 @@ A nostalgic Windows 95-inspired web operating system built with React, featuring
 - **C++ / SDL2 ([`cpp/`](cpp/))**: a native rewrite of the same desktop and five games,
   plus a Paint program, in one small binary with no browser engine. See [cpp/README.md](cpp/README.md) to build it.
 
+## Screenshot
+
+Paint running in the C++ version:
+
+![RetroOS Paint with a smiley face drawn on the canvas](docs/paint.png)
+
 ## Overview
 
 RetroOS recreates the iconic Windows 95 interface in your browser, complete with draggable windows, a start menu, taskbar, and desktop icons. It includes five classic games that run in separate windows, bringing back the nostalgia of 90s computing.
@@ -47,6 +53,10 @@ Match pairs of cards by remembering their positions. Flip two cards at a time to
 Classic arcade tennis game. Control your paddle to hit the ball past the CPU opponent.
 
 **Controls**: Mouse movement
+
+## Paint (C++ version)
+
+A classic bitmap editor with pencil, brush, airbrush, eraser, fill, color picker, line, rectangle, ellipse and rounded rectangle tools, a 28-color palette (left click picks the foreground color, right click the background), undo/redo, and saving and opening `.bmp` files. See [cpp/README.md](cpp/README.md#paint) for the full controls.
 
 ## Tech Stack
 
