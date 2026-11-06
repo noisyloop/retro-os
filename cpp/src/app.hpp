@@ -31,7 +31,11 @@ public:
     // Input (only delivered while this app's window is focused). Content-local.
     virtual void onKey(SDL_Keycode /*key*/, bool /*down*/) {}
     virtual void onMouse(const MouseEvent& /*e*/) {}
+    // While a button is held over the content, moves and the release keep coming
+    // here even outside the client area, so coordinates can be out of range.
     virtual void onMouseMove(int /*x*/, int /*y*/) {}
+    // A file dropped onto the RetroOS window while this app is focused.
+    virtual void onDropFile(const std::string& /*path*/) {}
 
     // Optional short status (e.g. score) shown by games; may be empty.
     virtual std::string status() const { return {}; }

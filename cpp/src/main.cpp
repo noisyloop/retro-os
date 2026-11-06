@@ -3,6 +3,7 @@
 #include <SDL_ttf.h>
 
 #include <cstdio>
+#include <memory>
 
 #include "gfx.hpp"
 #include "wm.hpp"
@@ -51,7 +52,9 @@ int main(int, char**) {
     }
 
     Gfx gfx(ren, font, bold);
-    Desktop desk(W, H);
+    // Heap-allocated so apps (which may own textures) are destroyed before the renderer.
+    auto deskPtr = std::make_unique<Desktop>(W, H);
+    Desktop& desk = *deskPtr;
 
     // Optional: auto-open apps at startup (comma-separated), handy for testing/screenshots.
     if (const char* al = SDL_getenv("RETRO_AUTOLAUNCH")) {
@@ -93,6 +96,10 @@ int main(int, char**) {
             case SDL_KEYUP:
                 desk.key(e.key.keysym.sym, false);
                 break;
+            case SDL_DROPFILE:
+                desk.dropFile(e.drop.file);
+                SDL_free(e.drop.file);
+                break;
             }
         }
 
@@ -106,6 +113,7 @@ int main(int, char**) {
         SDL_RenderPresent(ren);
     }
 
+    deskPtr.reset();
     if (bold) TTF_CloseFont(bold);
     TTF_CloseFont(font);
     SDL_DestroyRenderer(ren);

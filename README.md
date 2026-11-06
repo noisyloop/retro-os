@@ -6,7 +6,7 @@ A nostalgic Windows 95-inspired web operating system built with React, featuring
 
 - **React (this folder)**: the original, runs in the browser or as an Electron desktop app.
 - **C++ / SDL2 ([`cpp/`](cpp/))**: a native rewrite of the same desktop and five games,
-  one small binary with no browser engine. See [cpp/README.md](cpp/README.md) to build it.
+  plus a Paint program, in one small binary with no browser engine. See [cpp/README.md](cpp/README.md) to build it.
 
 ## Overview
 
@@ -185,7 +185,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - Additional classic games (Breakout, Space Invaders, Pac-Man clone)
 - Notepad application
-- Paint application
+- Paint application (available in the C++ version)
 - Calculator
 - File explorer simulation
 - Multiple desktop themes

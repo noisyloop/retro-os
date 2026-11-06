@@ -24,6 +24,7 @@ public:
     void mouseUp(int x, int y, int button);
     void mouseMove(int x, int y);
     void key(SDL_Keycode k, bool down);
+    void dropFile(const std::string& path);
 
     void update(double dt);
     void draw(Gfx& g);
@@ -51,6 +52,7 @@ private:
 
     // Interaction state.
     Window* dragging_ = nullptr;
+    Window* captured_ = nullptr;  // window whose content got the last press
     int dragDX_ = 0, dragDY_ = 0;
     bool startOpen_ = false;
     int cascade_ = 0;

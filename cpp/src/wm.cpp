@@ -115,6 +115,7 @@ void Desktop::mouseDown(int x, int y, int button) {
             dragDY_ = y - w->frame().y;
         } else if (w->hitContent(x, y)) {
             SDL_Rect cr = w->contentRect();
+            captured_ = w;
             w->app()->onMouse({x - cr.x, y - cr.y, button, true});
         }
         return;
@@ -146,11 +147,18 @@ void Desktop::mouseUp(int x, int y, int button) {
             if (wp->hitClose(x, y)) wp->wantClose = true;
         }
     }
-    if (Window* w = focused(); w && w->hitContent(x, y)) {
+    if (captured_) {
+        SDL_Rect cr = captured_->contentRect();
+        captured_->app()->onMouse({x - cr.x, y - cr.y, button, false});
+        // Stay captured until every button is up.
+        if ((SDL_GetMouseState(nullptr, nullptr) & ~SDL_BUTTON(button)) == 0) captured_ = nullptr;
+    } else if (Window* w = focused(); w && w->hitContent(x, y)) {
         SDL_Rect cr = w->contentRect();
         w->app()->onMouse({x - cr.x, y - cr.y, button, false});
     }
     // Reap closed windows.
+    for (auto& wp : wins_)
+        if (wp->wantClose && wp.get() == captured_) captured_ = nullptr;
     wins_.erase(std::remove_if(wins_.begin(), wins_.end(),
                                [](const std::unique_ptr<Window>& w) { return w->wantClose; }),
                 wins_.end());
@@ -161,10 +169,17 @@ void Desktop::mouseMove(int x, int y) {
         dragging_->moveTo(x - dragDX_, y - dragDY_);
         return;
     }
-    if (Window* w = focused(); w && w->hitContent(x, y)) {
+    if (captured_) {
+        SDL_Rect cr = captured_->contentRect();
+        captured_->app()->onMouseMove(x - cr.x, y - cr.y);
+    } else if (Window* w = focused(); w && w->hitContent(x, y)) {
         SDL_Rect cr = w->contentRect();
         w->app()->onMouseMove(x - cr.x, y - cr.y);
     }
+}
+
+void Desktop::dropFile(const std::string& path) {
+    if (Window* w = focused()) w->app()->onDropFile(path);
 }
 
 void Desktop::key(SDL_Keycode k, bool down) {
