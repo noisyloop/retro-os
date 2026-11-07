@@ -4,7 +4,8 @@
 `src/apps/*.cpp` (Snake, Minesweeper, Tetris, Memory, Pong, Paint) and
 `CMakeLists.txt`. The React/Electron version is out of scope.
 
-**Status:** first pass, findings only. Nothing in the code has been changed yet.
+**Status:** findings 1, 3 and 4 are fixed in `apps/paint.cpp` (see "Fixes" below).
+Findings 2, 5, 6 and 7 are still open.
 
 ## Summary
 
@@ -18,15 +19,15 @@ The games and the window manager use fixed-size arrays with explicit bounds chec
 everywhere they index. A sanitizer build (ASan + UBSan) compiles cleanly with
 `-Wall -Wextra` and no warnings.
 
-| # | Severity | Finding | Location |
-|---|---|---|---|
-| 1 | Medium | A tiny crafted BMP makes Paint allocate gigabytes (out-of-memory crash) | `apps/paint.cpp:233` |
-| 2 | Medium | Untrusted BMP parsing has no minimum SDL version (known SDL BMP CVEs) | `CMakeLists.txt:12`, `apps/paint.cpp:235` |
-| 3 | Low | Dropping a FIFO or device file freezes the whole desktop | `apps/paint.cpp:235` |
-| 4 | Low | Save follows symlinks, overwrites, and uses a predictable name, falling back to the working directory | `apps/paint.cpp:129`, `:587` |
-| 5 | Low | No upper limit on open windows, and each Paint window keeps up to 33 canvas copies | `wm.cpp:124`, `apps/paint.cpp:498` |
-| 6 | Info | Compiler hardening flags depend on the distro's defaults | `CMakeLists.txt` |
-| 7 | Info | Unchecked `std::localtime` result | `wm.cpp:299`, `apps/paint.cpp:593` |
+| # | Severity | Finding | Location | Status |
+|---|---|---|---|---|
+| 1 | Medium | A tiny crafted BMP makes Paint allocate gigabytes (out-of-memory crash) | `apps/paint.cpp:233` | Fixed |
+| 2 | Medium | Untrusted BMP parsing has no minimum SDL version (known SDL BMP CVEs) | `CMakeLists.txt:12`, `apps/paint.cpp:235` | Open |
+| 3 | Low | Dropping a FIFO or device file freezes the whole desktop | `apps/paint.cpp:235` | Fixed |
+| 4 | Low | Save follows symlinks, overwrites, and uses a predictable name, falling back to the working directory | `apps/paint.cpp:129`, `:587` | Fixed |
+| 5 | Low | No upper limit on open windows, and each Paint window keeps up to 33 canvas copies | `wm.cpp:124`, `apps/paint.cpp:498` | Open |
+| 6 | Info | Compiler hardening flags depend on the distro's defaults | `CMakeLists.txt` | Open |
+| 7 | Info | Unchecked `std::localtime` result | `wm.cpp:299`, `apps/paint.cpp:593` | Open (fixed in `save` only) |
 
 Threat model used: the user is trusted. Files the user is tricked into opening
 (downloads, email attachments, shared folders) are not. Other local users on a
@@ -176,10 +177,47 @@ check its result.
   SDL functions the same way Paint does (crafted 54-byte and 1 KB BMPs, a `mkfifo`
   pipe, a symlink).
 
+## Fixes (findings 1, 3, 4)
+
+All in `apps/paint.cpp`:
+
+- **Opening (`loadBmpChecked`)**: the file is opened with `O_NONBLOCK`, `fstat`ed on
+  the descriptor, and refused unless it's a regular file under 65 MB. It's then
+  read into memory, so the checks and the decoder see the same bytes. The BMP
+  header's width and height (OS/2 12-byte and Windows 40+-byte headers, including
+  negative top-down heights) must be 1 to 4096, and only then is it handed to
+  `SDL_LoadBMP_RW` from memory. Worst-case allocation is now about 64 MB, plus the
+  converted copy.
+- **Saving (`createNew`, `writeBmp`)**: the file is created with
+  `O_CREAT | O_EXCL | O_NOFOLLOW`, so it never follows a symlink and never overwrites.
+  If the name is taken, it tries `-1`, `-2`, … up to `-99`. A partial file is removed
+  if writing fails. When `HOME` is unset it uses the passwd entry, and if that isn't
+  available either it refuses to save rather than writing to the working
+  directory. `localtime_r` is checked.
+
+Verified by driving the real `Paint` class (from the app registry, under ASan +
+UBSan) with each attack file:
+
+| Input | Before | After |
+|---|---|---|
+| 54-byte 30000x30000 BMP | 6.8 GB RSS, "opens" | refused, RSS 15 MB |
+| 1 KB RLE8 20000x20000 BMP | 1.9 GB RSS | refused |
+| named pipe | hangs forever | refused immediately ("not a regular file") |
+| `/dev/zero`, non-BMP file | — | refused immediately |
+| valid 600x400 BMP | opens, cropped | opens, cropped, pixel-identical to the source crop |
+| Ctrl+S with symlinks planted for the next 6 timestamps | victim file overwritten | victim untouched, saved as `…-1.bmp`, `…-2.bmp` |
+| Ctrl+S with `HOME` unset | writes to working dir | writes to the passwd home dir |
+
+The full app also ran headless (`SDL_VIDEODRIVER=dummy`) with all six apps open
+under the sanitizers, with no reports.
+
 Not done yet:
 
 - Running the full GUI under ASan with scripted input (needs a virtual display),
   and fuzzing the drop path, e.g. libFuzzer over `SDL_LoadBMP_RW` plus the copy
   loop, to look for parser bugs beyond the allocation issue.
-- Writing the fixes above. Findings 1, 3 and 4 all touch the same two functions,
-  so they should go in as one change to `onDropFile` / `save`.
+- Findings 2, 5, 6 and 7 (the CMake changes, a window cap, and the clock's
+  `localtime` guard).
+- Not security, but noticed while testing: the font paths in `main.cpp` are
+  Arch-only, so on Debian/Ubuntu (`/usr/share/fonts/truetype/dejavu/`) the app
+  exits with "no usable font found".
