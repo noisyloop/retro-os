@@ -3,11 +3,17 @@
 // background), and a status bar. Left-drag draws with the foreground colour,
 // right-drag with the background colour. Ctrl+Z/Ctrl+Y undo/redo, Ctrl+N new,
 // Ctrl+S saves a .bmp, and dropping a .bmp onto the window opens it.
+#include <fcntl.h>
+#include <pwd.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <deque>
 #include <random>
@@ -126,13 +132,112 @@ SDL_Color iconColor(char ch) {
     }
 }
 
-std::string saveDir() {
+// The user's home directory: $HOME, else the passwd entry. Empty if neither is known
+// (never the working directory, which might be somewhere shared like /tmp).
+std::string homeDir() {
     const char* home = std::getenv("HOME");
-    if (!home || !*home) return ".";
-    std::string pics = std::string(home) + "/Pictures";
+    if (home && *home) return home;
+    if (const passwd* pw = getpwuid(getuid()); pw && pw->pw_dir && *pw->pw_dir) return pw->pw_dir;
+    return {};
+}
+
+std::string saveDir() {
+    std::string home = homeDir();
+    if (home.empty()) return {};
+    std::string pics = home + "/Pictures";
     struct stat st;
     if (stat(pics.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) return pics;
     return home;
+}
+
+// Opened pictures bigger than this are refused outright. SDL allocates whatever size
+// the header claims (a 54-byte file can ask for gigabytes), and only the top-left
+// canvas-sized corner is kept anyway.
+constexpr int kMaxOpenDim = 4096;
+constexpr off_t kMaxOpenBytes = off_t(kMaxOpenDim) * kMaxOpenDim * 4 + (1 << 20);
+
+Uint32 le32(const unsigned char* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (Uint32(p[3]) << 24); }
+Uint16 le16(const unsigned char* p) { return Uint16(p[0] | (p[1] << 8)); }
+
+// Load a BMP without trusting it: only regular files (a FIFO or device would block
+// the UI thread forever), at most kMaxOpenBytes, with sane header dimensions. The file
+// is read into memory first so the checks and the decode see the same bytes.
+SDL_Surface* loadBmpChecked(const std::string& path, std::string& err) {
+    int fd = open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOCTTY);
+    if (fd < 0) {
+        err = std::strerror(errno);
+        return nullptr;
+    }
+    struct stat st;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        close(fd);
+        err = "not a regular file";
+        return nullptr;
+    }
+    if (st.st_size > kMaxOpenBytes) {
+        close(fd);
+        err = "file is too large";
+        return nullptr;
+    }
+    std::vector<unsigned char> buf(size_t(st.st_size));
+    size_t got = 0;
+    while (got < buf.size()) {
+        ssize_t n = read(fd, buf.data() + got, buf.size() - got);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) break;
+        got += size_t(n);
+    }
+    close(fd);
+    buf.resize(got);
+
+    // BITMAPFILEHEADER (14 bytes), then the DIB header: 12-byte OS/2 core header with
+    // 16-bit sizes, or 40+ bytes with signed 32-bit sizes (negative height = top-down).
+    if (buf.size() < 26 || buf[0] != 'B' || buf[1] != 'M') {
+        err = "only .bmp files are supported";
+        return nullptr;
+    }
+    Uint32 dib = le32(&buf[14]);
+    long long w, h;
+    if (dib == 12) {
+        w = le16(&buf[18]);
+        h = le16(&buf[20]);
+    } else if (dib >= 40 && buf.size() >= 26) {
+        w = Sint32(le32(&buf[18]));
+        h = Sint32(le32(&buf[22]));
+        if (h < 0) h = -h;
+    } else {
+        err = "unsupported BMP header";
+        return nullptr;
+    }
+    if (w <= 0 || h <= 0 || w > kMaxOpenDim || h > kMaxOpenDim) {
+        err = "picture is " + std::to_string(w) + "x" + std::to_string(h) + ", the limit is " +
+              std::to_string(kMaxOpenDim) + "x" + std::to_string(kMaxOpenDim);
+        return nullptr;
+    }
+
+    SDL_RWops* rw = SDL_RWFromConstMem(buf.data(), int(buf.size()));
+    SDL_Surface* raw = rw ? SDL_LoadBMP_RW(rw, 1) : nullptr;
+    if (!raw) {
+        err = SDL_GetError();
+        return nullptr;
+    }
+    SDL_Surface* s = SDL_ConvertSurfaceFormat(raw, SDL_PIXELFORMAT_ARGB8888, 0);
+    SDL_FreeSurface(raw);
+    if (!s) err = SDL_GetError();
+    return s;
+}
+
+// Create a new file that did not exist before: never follows a symlink and never
+// overwrites (O_EXCL). Tries "<base>.bmp", then "<base>-1.bmp", ... Returns the fd or
+// -1 with errno set, and the chosen path in `path`.
+int createNew(const std::string& base, std::string& path) {
+    for (int i = 0; i < 100; ++i) {
+        path = base + (i ? "-" + std::to_string(i) : "") + ".bmp";
+        int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644);
+        if (fd >= 0 || errno != EEXIST) return fd;
+    }
+    errno = EEXIST;
+    return -1;
 }
 
 std::string baseName(const std::string& p) {
@@ -232,15 +337,10 @@ public:
 
     void onDropFile(const std::string& path) override {
         if (drawing_) return;
-        SDL_Surface* raw = SDL_LoadBMP(path.c_str());
-        if (!raw) {
-            flash("Can't open " + baseName(path) + ": only .bmp files are supported");
-            return;
-        }
-        SDL_Surface* s = SDL_ConvertSurfaceFormat(raw, SDL_PIXELFORMAT_ARGB8888, 0);
-        SDL_FreeSurface(raw);
+        std::string err;
+        SDL_Surface* s = loadBmpChecked(path, err);
         if (!s) {
-            flash(std::string("Can't read image: ") + SDL_GetError());
+            flash("Can't open " + baseName(path) + ": " + err);
             return;
         }
         pushUndo();
@@ -588,20 +688,51 @@ private:
         SDL_Surface* s = SDL_CreateRGBSurfaceWithFormatFrom(pixels_.data(), kCW, kCH, 32, kCW * int(sizeof(Px)),
                                                             SDL_PIXELFORMAT_ARGB8888);
         SDL_Surface* rgb24 = s ? SDL_ConvertSurfaceFormat(s, SDL_PIXELFORMAT_BGR24, 0) : nullptr;
-        char stamp[32];
-        std::time_t now = std::time(nullptr);
-        std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", std::localtime(&now));
-        std::string path = saveDir() + "/retroos-paint-" + stamp + ".bmp";
-        if (rgb24 && SDL_SaveBMP(rgb24, path.c_str()) == 0) {
-            const char* home = std::getenv("HOME");
-            std::string shown = path;
-            if (home && *home && path.rfind(home, 0) == 0) shown = "~" + path.substr(std::string(home).size());
-            flash("Saved " + shown);
-        } else {
-            flash(std::string("Save failed: ") + SDL_GetError());
-        }
-        if (rgb24) SDL_FreeSurface(rgb24);
         if (s) SDL_FreeSurface(s);
+        if (!rgb24) {
+            flash(std::string("Save failed: ") + SDL_GetError());
+            return;
+        }
+        std::string err = writeBmp(rgb24);
+        SDL_FreeSurface(rgb24);
+        if (!err.empty()) flash("Save failed: " + err);
+    }
+
+    // Write to a fresh file in saveDir(); sets the status message on success and
+    // returns an error string otherwise.
+    std::string writeBmp(SDL_Surface* img) {
+        std::string dir = saveDir();
+        if (dir.empty()) return "can't find your home directory";
+        char stamp[32] = "undated";
+        std::time_t now = std::time(nullptr);
+        std::tm lt;
+        if (localtime_r(&now, &lt)) std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", &lt);
+
+        std::string path;
+        int fd = createNew(dir + "/retroos-paint-" + stamp, path);
+        if (fd < 0) return std::strerror(errno);
+        FILE* fp = fdopen(fd, "wb");
+        if (!fp) {
+            int e = errno;
+            close(fd);
+            unlink(path.c_str());
+            return std::strerror(e);
+        }
+        SDL_RWops* rw = SDL_RWFromFP(fp, SDL_TRUE);  // closes fp
+        if (!rw) {
+            std::fclose(fp);
+            unlink(path.c_str());
+            return SDL_GetError();
+        }
+        if (SDL_SaveBMP_RW(img, rw, 1) != 0) {
+            std::string e = SDL_GetError();
+            unlink(path.c_str());
+            return e;
+        }
+        std::string home = homeDir(), shown = path;
+        if (!home.empty() && path.rfind(home + "/", 0) == 0) shown = "~" + path.substr(home.size());
+        flash("Saved " + shown);
+        return {};
     }
 
     // -- UI pieces -------------------------------------------------------------
