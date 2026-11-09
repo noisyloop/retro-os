@@ -18,6 +18,10 @@ cmake -S . -B build && cmake --build build
 ./build/retroos
 ```
 
+SDL 2.0.20 or newer is required. For a debug build with AddressSanitizer and
+UBSan, configure with `-DRETRO_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug`. See
+[SECURITY_REVIEW.md](SECURITY_REVIEW.md) for the security review.
+
 Double-click a desktop icon or use **Start** to open an app.
 `RETRO_AUTOLAUNCH=Paint,Tetris ./build/retroos` opens apps at startup.
 

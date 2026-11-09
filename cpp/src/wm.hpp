@@ -15,6 +15,7 @@ class Gfx;
 class Desktop {
 public:
     static constexpr int kTaskbarH = 28;
+    static constexpr size_t kMaxWindows = 32;  // launch() does nothing beyond this
 
     Desktop(int w, int h);
 

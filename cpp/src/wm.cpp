@@ -60,6 +60,7 @@ void Desktop::raise(Window* w) {
 }
 
 void Desktop::launch(const std::string& name) {
+    if (wins_.size() >= kMaxWindows) return;
     for (auto& a : appRegistry()) {
         if (a.name == name) {
             int x = 60 + cascade_ * 24, y = 40 + cascade_ * 24;
@@ -71,6 +72,14 @@ void Desktop::launch(const std::string& name) {
 }
 
 void Desktop::mouseDown(int x, int y, int button) {
+    // A button is already held inside a window's content: that window keeps the mouse
+    // until every button is up, so it always sees the matching release.
+    if (captured_) {
+        SDL_Rect cr = captured_->contentRect();
+        captured_->app()->onMouse({x - cr.x, y - cr.y, button, true});
+        return;
+    }
+
     // Start menu interactions first.
     if (startOpen_) {
         int idx = startMenuItemAt(x, y);
@@ -101,6 +110,7 @@ void Desktop::mouseDown(int x, int y, int button) {
                 return;
             }
             bx += bw + 3;
+            if (bx > tb.w - 90) break;  // same cut-off as drawTaskbar
         }
         return;
     }
@@ -232,10 +242,10 @@ void Desktop::drawTaskbar(Gfx& g) {
     // Clock tray.
     SDL_Rect tray = {tb.w - 74, tb.y + 4, 68, kTaskbarH - 8};
     g.thinSunken(tray);
-    char buf[16];
+    char buf[16] = "--:--";
     std::time_t t = std::time(nullptr);
-    std::tm* lt = std::localtime(&t);
-    std::strftime(buf, sizeof buf, "%H:%M", lt);
+    std::tm lt;
+    if (localtime_r(&t, &lt)) std::strftime(buf, sizeof buf, "%H:%M", &lt);
     g.textIn(buf, tray, c95::black, Gfx::Center);
 }
 

@@ -12,6 +12,8 @@ static TTF_Font* openFirst(int size, int style) {
     const char* candidates[] = {
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
         "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  // Debian / Ubuntu
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",  // Fedora
         "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
         "/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf",
     };
