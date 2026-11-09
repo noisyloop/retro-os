@@ -1,11 +1,13 @@
 # Security review: RetroOS C++/SDL2 version
 
-**Scope:** everything under `cpp/` as of commit `76bc5a3`: `src/*.cpp|hpp`,
-`src/apps/*.cpp` (Snake, Minesweeper, Tetris, Memory, Pong, Paint) and
-`CMakeLists.txt`. The React/Electron version is out of scope.
+**Scope:** everything under `cpp/`: `src/*.cpp|hpp`, `src/apps/*.cpp` (Snake,
+Minesweeper, Tetris, Memory, Pong, Paint) and `CMakeLists.txt`. The React/Electron
+version is out of scope.
 
-**Status:** findings 1, 3 and 4 are fixed in `apps/paint.cpp` (see "Fixes" below).
-Findings 2, 5, 6 and 7 are still open.
+**Status:** all eight findings are fixed. The first pass (commit `76bc5a3`) found 1-7
+and fixed 1, 3 and 4. The second pass (commit `36e09a8`) re-read the code, ran the
+real GUI under sanitizers with scripted input, fuzzed the file-open path, found 8,
+and fixed 2, 5, 6, 7 and 8. See "Second pass" at the end.
 
 ## Summary
 
@@ -17,17 +19,19 @@ are in those two paths.
 
 The games and the window manager use fixed-size arrays with explicit bounds checks
 everywhere they index. A sanitizer build (ASan + UBSan) compiles cleanly with
-`-Wall -Wextra` and no warnings.
+`-Wall -Wextra` and no warnings. No memory-safety bug was found in RetroOS's own
+code in either pass.
 
 | # | Severity | Finding | Location | Status |
 |---|---|---|---|---|
 | 1 | Medium | A tiny crafted BMP makes Paint allocate gigabytes (out-of-memory crash) | `apps/paint.cpp:233` | Fixed |
-| 2 | Medium | Untrusted BMP parsing has no minimum SDL version (known SDL BMP CVEs) | `CMakeLists.txt:12`, `apps/paint.cpp:235` | Open |
+| 2 | Medium | Untrusted BMP parsing has no minimum SDL version (known SDL BMP CVEs) | `CMakeLists.txt`, `apps/paint.cpp:219` | Fixed |
 | 3 | Low | Dropping a FIFO or device file freezes the whole desktop | `apps/paint.cpp:235` | Fixed |
 | 4 | Low | Save follows symlinks, overwrites, and uses a predictable name, falling back to the working directory | `apps/paint.cpp:129`, `:587` | Fixed |
-| 5 | Low | No upper limit on open windows, and each Paint window keeps up to 33 canvas copies | `wm.cpp:124`, `apps/paint.cpp:498` | Open |
-| 6 | Info | Compiler hardening flags depend on the distro's defaults | `CMakeLists.txt` | Open |
-| 7 | Info | Unchecked `std::localtime` result | `wm.cpp:299`, `apps/paint.cpp:593` | Open (fixed in `save` only) |
+| 5 | Low | No upper limit on open windows, and each Paint window keeps up to 33 canvas copies | `wm.cpp:63`, `apps/paint.cpp:598` | Fixed |
+| 6 | Info | Compiler hardening flags depend on the distro's defaults | `CMakeLists.txt` | Fixed |
+| 7 | Info | Unchecked `std::localtime` result | `wm.cpp:248`, `apps/paint.cpp:709` | Fixed |
+| 8 | Low | A second mouse button on another window steals the mouse and leaves Paint stuck mid-stroke | `wm.cpp:77` | Fixed |
 
 Threat model used: the user is trusted. Files the user is tricked into opening
 (downloads, email attachments, shared folders) are not. Other local users on a
@@ -67,9 +71,8 @@ CVE-2021-33657 is a heap overflow reachable via a crafted BMP, fixed in SDL 2.0.
 `CMakeLists.txt` accepts any `sdl2` that pkg-config finds, so a build against an
 old system SDL is silently exposed to those bugs.
 
-**Fix:** pin a floor, e.g. `pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2>=2.30)`,
-and keep the size checks from finding 1, which also reduce how much of the parser
-is reachable.
+**Fix:** pin a floor in `pkg_check_modules`, and keep the size checks from finding 1,
+which also reduce how much of the parser is reachable. Done in the second pass.
 
 ## 3. Dropping a FIFO / special file hangs the UI (Low)
 
@@ -168,15 +171,6 @@ check its result.
 - **Fonts:** loaded from fixed absolute system paths only, not from the working
   directory or the environment.
 
-## Method and what's left
-
-- Manual read of all 2,187 lines in `cpp/`.
-- Built with `-fsanitize=address,undefined` against SDL 2.30.0 / SDL_ttf 2.22.0:
-  clean compile, no warnings.
-- Findings 1, 3 and 4 reproduced with small standalone harnesses that call the same
-  SDL functions the same way Paint does (crafted 54-byte and 1 KB BMPs, a `mkfifo`
-  pipe, a symlink).
-
 ## Fixes (findings 1, 3, 4)
 
 All in `apps/paint.cpp`:
@@ -211,13 +205,92 @@ UBSan) with each attack file:
 The full app also ran headless (`SDL_VIDEODRIVER=dummy`) with all six apps open
 under the sanitizers, with no reports.
 
-Not done yet:
+---
 
-- Running the full GUI under ASan with scripted input (needs a virtual display),
-  and fuzzing the drop path, e.g. libFuzzer over `SDL_LoadBMP_RW` plus the copy
-  loop, to look for parser bugs beyond the allocation issue.
-- Findings 2, 5, 6 and 7 (the CMake changes, a window cap, and the clock's
-  `localtime` guard).
-- Not security, but noticed while testing: the font paths in `main.cpp` are
-  Arch-only, so on Debian/Ubuntu (`/usr/share/fonts/truetype/dejavu/`) the app
-  exits with "no usable font found".
+## Second pass
+
+### 8. A second button on another window steals the mouse (Low, new)
+
+While a button is held inside a window's content, the window manager keeps sending
+that window the moves and the release (`captured_`). But `mouseDown` replaced
+`captured_` whenever a *different* button was pressed on another window, so the first
+window never got its release.
+
+For Paint that means it stays in "drawing" forever: Ctrl+S, Ctrl+Z, Ctrl+N, the tool
+keys and file drops are all ignored, and the only way out is Esc, which throws the
+stroke away. Not memory-unsafe (the undo stack stays consistent), but an accidental
+right-click on another window can make saving silently stop working.
+
+Reproduced under Xvfb with two Paint windows: hold left in window A, press right in
+window B, release both, focus A, press Ctrl+S three times.
+
+| | Files saved |
+|---|---|
+| Before | 0 of 3 |
+| After | 3 of 3 |
+
+**Fix (`wm.cpp`):** while a window has the mouse, further presses go to that window
+instead of changing focus, as a real window manager's pointer grab does.
+
+### Fixes for the findings left open (2, 5, 6, 7)
+
+- **2, SDL floor:** `CMakeLists.txt` now requires `sdl2>=2.0.20`, the release that
+  fixed CVE-2021-33657. The floor is deliberately not higher so Ubuntu 22.04
+  (2.0.20) and Debian 12 (2.26) still build. SDL_ttf has no floor: its known bug
+  (CVE-2022-27470, fixed in 2.20.0) needs a malicious font, and fonts are only
+  loaded from fixed system paths.
+- **5, window cap:** `Desktop::launch` stops at 32 windows. With
+  `RETRO_AUTOLAUNCH` set to 200 Paints, resident memory went from 396 MB to 170 MB
+  (32 windows). The taskbar hit test now stops where the drawing stops.
+- **6, hardening:** `CMakeLists.txt` turns on PIE, `-fstack-protector-strong`,
+  `-fstack-clash-protection`, `-fcf-protection` (each only if the compiler accepts
+  it), `_FORTIFY_SOURCE=2` in optimised builds, and full RELRO, `-z now` and
+  `-z noexecstack` at link time. `-DRETRO_SANITIZE=ON` gives an ASan + UBSan build.
+  Checked with `readelf` on the Release binary: PIE, `BIND_NOW`, stack protector and
+  fortified calls are present.
+- **7, `localtime`:** the taskbar clock uses `localtime_r` and shows `--:--` if it
+  fails.
+
+### What was tested
+
+Against SDL 2.30.0 / SDL_ttf 2.22.0 on Ubuntu 24.04, GCC 13 and Clang 18:
+
+- **Full GUI under ASan + UBSan** on a virtual display (Xvfb, software renderer),
+  driven by `xdotool`. Five random-input runs of 6,000 events each (three before
+  the fixes, two after) with all six apps open: moves on and off the window,
+  presses and releases of all three buttons in any order, double-clicks, window
+  drags and closes, Start menu launches and the apps' keys. No sanitizer reports
+  and no crash. A scripted Paint run covered every tool, strokes dragged far outside
+  the window, Esc mid-stroke, 40 undos and redos, and saving.
+- **Fuzzing the file-open path.** A libFuzzer harness built from the real
+  `apps/paint.cpp` feeds each input to `Paint::onDropFile`. Seeded with 24 valid
+  BMPs (1/4/8/16/24/32 bpp, OS/2 and V4/V5 headers, top-down, RLE4, RLE8,
+  bitfields): 15.4 million runs in 400 seconds on 4 workers, no crash, no leak, no
+  sanitizer report.
+- **The earlier fixes (1, 3, 4) still hold:** two saves in the same second produce
+  `...bmp` and `...-1.bmp`.
+
+### Limits of this review
+
+- The fuzzer ran against the distro's SDL, which is **not** built with sanitizers.
+  It checks RetroOS's own parsing and copy loop thoroughly, but an overflow inside
+  SDL's BMP decoder would only be caught if it corrupted the heap badly enough to
+  crash. A build of SDL with ASan would close that gap.
+- File drops weren't sent through the real drag-and-drop protocol, only through the
+  same `onDropFile` call the event loop makes.
+- A regular file on a hung network or FUSE mount still blocks the UI while it is
+  read (up to 65 MB), since everything runs on one thread. Reading on a worker
+  thread would fix it.
+- There is no CI for `cpp/`. A job that builds with `-DRETRO_SANITIZE=ON` and runs
+  the app headless would catch regressions.
+
+### Not security, noticed while testing
+
+- **Fixed:** the font list in `main.cpp` had Arch paths only, so the app exited with
+  "no usable font found" elsewhere. The Debian/Ubuntu path (tested) and the Fedora
+  path (not tested) are added.
+- **Open:** apps read Ctrl and Shift with `SDL_GetModState()`, which is the state
+  after *all* queued events, not at the time of the key press. A very fast Ctrl+S
+  (press and release within one frame, as synthetic input does) is taken as a plain
+  S. Using the event's own `keysym.mod` would fix it.
+- **Open:** with enough windows the task buttons draw over the clock.
